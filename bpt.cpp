@@ -4,15 +4,18 @@
 #include <map>
 #include <set>
 #include <algorithm>
+#include <cstring>
 
 using namespace std;
 
 const string DATA_FILE = "bpt_data.dat";
+const int BUFFER_SIZE = 1024 * 1024; // 1MB buffer
 
-// File-based key-value store with B+ tree index
+// Optimized file-based key-value store
 class BPlusTree {
 private:
     map<string, set<int>> data;
+    bool dirty;
 
     void load_from_file() {
         ifstream infile(DATA_FILE, ios::binary);
@@ -20,12 +23,16 @@ private:
             return;
         }
 
+        // Use larger buffer for faster reading
+        char* buffer = new char[BUFFER_SIZE];
+        infile.rdbuf()->pubsetbuf(buffer, BUFFER_SIZE);
+
         // Read data format: key_len (int) | key | count (int) | values...
-        while (infile.peek() != EOF) {
+        while (infile.peek() != EOF && infile.good()) {
             int key_len;
             infile.read((char*)&key_len, sizeof(int));
 
-            if (infile.eof()) break;
+            if (infile.eof() || !infile.good()) break;
 
             string key(key_len, '\0');
             infile.read(&key[0], key_len);
@@ -43,14 +50,21 @@ private:
             data[key] = values;
         }
 
+        delete[] buffer;
         infile.close();
     }
 
     void save_to_file() {
+        if (!dirty) return;
+
         ofstream outfile(DATA_FILE, ios::binary);
         if (!outfile.is_open()) {
             return;
         }
+
+        // Use larger buffer for faster writing
+        char* buffer = new char[BUFFER_SIZE];
+        outfile.rdbuf()->pubsetbuf(buffer, BUFFER_SIZE);
 
         for (const auto& entry : data) {
             const string& key = entry.first;
@@ -68,11 +82,13 @@ private:
             }
         }
 
+        delete[] buffer;
         outfile.close();
+        dirty = false;
     }
 
 public:
-    BPlusTree() {
+    BPlusTree() : dirty(false) {
         load_from_file();
     }
 
@@ -82,7 +98,7 @@ public:
 
     void insert(const string& key, int value) {
         data[key].insert(value);
-        save_to_file();
+        dirty = true;
     }
 
     void remove(const string& key, int value) {
@@ -92,7 +108,7 @@ public:
             if (it->second.empty()) {
                 data.erase(it);
             }
-            save_to_file();
+            dirty = true;
         }
     }
 
@@ -102,14 +118,6 @@ public:
             return it->second;
         }
         return set<int>();
-    }
-
-    bool exists(const string& key, int value) {
-        auto it = data.find(key);
-        if (it != data.end()) {
-            return it->second.count(value) > 0;
-        }
-        return false;
     }
 };
 
